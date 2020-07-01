@@ -29,6 +29,9 @@ AlgaNode {
 
 	var <controlNames;
 
+	//per-parameter connectionTime
+	var <paramsConnectionTime;
+
 	var <numChannels, <rate;
 
 	var <group, <playGroup, <synthGroup, <normGroup, <interpGroup;
@@ -52,6 +55,9 @@ AlgaNode {
 		//param -> ControlName
 		controlNames = Dictionary(10);
 
+		//param -> connectionTime
+		paramsConnectionTime = Dictionary(10);
+
 		//Per-argument dictionaries of interp/norm Busses and Synths belonging to this AlgaNode
 		normBusses   = Dictionary(10);
 		interpBusses = Dictionary(10);
@@ -72,41 +78,115 @@ AlgaNode {
 		connectionTimeOutNodes = Dictionary.new(10);
 
 		//starting connectionTime (using the setter so it also sets longestConnectionTime)
-		this.connectionTime_(argConnectionTime);
+		this.connectionTime_(argConnectionTime, true);
         this.playTime_(argPlayTime);
 
 		//Dispatch node creation
 		this.dispatchNode(argObj, argArgs, true);
 	}
 
+	setParamsConnectionTime { | val, all = false, param |
+		//If all, set all paramConnectionTime regardless of their previous value
+		if(all, {
+			paramsConnectionTime.keysValuesChange({ val });
+		}, {
+			//If not all, only set new param value if param != nil
+			if(param != nil, {
+				var paramConnectionTime = paramsConnectionTime[param];
+				if(paramConnectionTime != nil, {
+					paramsConnectionTime[param] = val;
+				}, {
+					("Invalid param to set connection time for: " ++ param).error;
+				});
+			}, {
+				//This will just change the
+				//paramConnectionTime for paramConnectionTimes that haven't been explicitly modified
+				paramsConnectionTime.keysValuesChange({ | param, paramConnectionTime |
+					if(paramConnectionTime == connectionTime, { val }, { paramConnectionTime });
+				});
+			});
+		});
+	}
+
 	//connectionTime / connectTime / ct / interpolationTime / interpTime / it
-	connectionTime_ { | val |
-		connectionTime = val;
+	connectionTime_ { | val, all = false, param |
+		if(val < 0, { val = 0 });
+		//this must happen before setting connectionTime, as it's been used to set
+		//paramConnectionTimes, checking against the previous connectionTime (before updating it)
+		this.setParamsConnectionTime(val, all, param);
+
+		//Only set global connectionTime if param is nil
+		if(param == nil, {
+			connectionTime = val;
+		});
+
 		this.calculateLongestConnectionTime(val);
 	}
 
-    connectTime_ { | val | this.connectionTime_(val) }
+	//Convenience wrappers
+	setAllConnectionTime { | val |
+		this.connectionTime_(val, true);
+	}
+
+	allct { | val |
+		this.connectionTime_(val, true);
+	}
+
+	allit { | val |
+		this.connectionTime_(val, true);
+	}
+
+	act { | val |
+		this.connectionTime_(val, true);
+	}
+
+	ait { | val |
+		this.connectionTime_(val, true);
+	}
+
+	setParamConnectionTime { | param, val |
+		this.connectionTime_(val, false, param);
+	}
+
+	paramct { | param, val |
+		this.connectionTime_(val, false, param);
+	}
+
+	pct { | param, val |
+		this.connectionTime_(val, false, param);
+	}
+
+	paramit { | param, val |
+		this.connectionTime_(val, false, param);
+	}
+
+	pit { | param, val |
+		this.connectionTime_(val, false, param);
+	}
+
+    connectTime_ { | val, all = false, param | this.connectionTime_(val, all, param) }
 
     connectTime { ^connectionTime }
 
-	ct_ { | val | this.connectionTime_(val) }
+	ct_ { | val, all = false, param | this.connectionTime_(val, all, param) }
 
 	ct { ^connectionTime }
 
-    interpolationTime_ { | val | this.connectionTime_(val) }
+    interpolationTime_ { | val, all = false, param | this.connectionTime_(val, all, param) }
 
     interpolationTime { ^connectionTime }
 
-	interpTime_ { | val | this.connectionTime_(val) }
+	interpTime_ { | val, all = false, param | this.connectionTime_(val, all, param) }
 
 	interpTime { ^connectionTime }
 
-	it_ { | val | this.connectionTime_(val) }
+	it_ { | val, all = false, param | this.connectionTime_(val, all, param) }
 
 	it { ^connectionTime }
 
 	//playTime
     playTime_ { | val |
+		if(val < 0, { val = 0 });
         playTime = val;
         this.calculateLongestWaitTime;
     }
@@ -306,7 +386,7 @@ AlgaNode {
 		var synthDesc = SynthDescLib.global.at(obj);
 
 		if(synthDesc == nil, {
-			("Invalid AlgaSynthDef: '" ++ obj.asString ++"'").error;
+			("Invalid AlgaSynthDef: '" ++ obj.asString ++ "'").error;
 			this.clear;
 			^nil;
 		});
@@ -320,7 +400,7 @@ AlgaNode {
 		});
 
 		synthDescControlNames = synthDesc.controls;
-		this.createControlNames(synthDescControlNames);
+		this.createControlNamesAndParamsConnectionTime(synthDescControlNames);
 
 		numChannels = synthDef.numChannels;
 		rate = synthDef.rate;
@@ -343,7 +423,7 @@ AlgaNode {
 			server.sync;
 
 			synthDescControlNames = synthDef.asSynthDesc.controls;
-			this.createControlNames(synthDescControlNames);
+			this.createControlNamesAndParamsConnectionTime(synthDescControlNames);
 
 			numChannels = synthDef.numChannels;
 			rate = synthDef.rate;
@@ -358,14 +438,21 @@ AlgaNode {
 	}
 
 	//Remove \fadeTime \out and \gate and generate controlNames dict entries
-	createControlNames { | synthDescControlNames |
+	createControlNamesAndParamsConnectionTime { | synthDescControlNames |
 		synthDescControlNames.do({ | controlName |
 			var paramName = controlName.name;
 			if((controlName.name != \fadeTime).and(
 				controlName.name != \out).and(
 				controlName.name != \gate).and(
 				controlName.name != '?'), {
-				controlNames[controlName.name] = controlName;
+
+				var paramName = controlName.name;
+
+				//Create controlNames
+				controlNames[paramName] = controlName;
+
+				//Create paramsConnectionTime
+				paramsConnectionTime[paramName] = connectionTime;
 			});
 		});
 	}
@@ -443,7 +530,6 @@ AlgaNode {
 			interpBus = interpBusses[paramName];
 			normBus = normBusses[paramName];
 
-
             //If replace, connect to the pervious bus, not default
             //This wouldn't work with mixing for now...
             if(replace, {
@@ -505,7 +591,7 @@ AlgaNode {
 
 	//Used at every << / >> / <|
 	createInterpSynthAtParam { | sender, param = \in |
-		var controlName;
+		var controlName, paramConnectionTime;
 		var paramNumChannels, paramRate;
 		var senderNumChannels, senderRate;
 		var interpSymbol;
@@ -513,6 +599,15 @@ AlgaNode {
 		var interpBus, interpSynth;
 
 		controlName = controlNames[param];
+		paramConnectionTime = paramsConnectionTime[param];
+
+		if((controlName.isNil).or(paramConnectionTime.isNil), {
+			("Invalid param for interp synth to free: " ++ param).error;
+			^this
+		});
+
+		//If -1, or invalid, set to global connectionTime
+		if(paramConnectionTime < 0, { paramConnectionTime = connectionTime });
 
 		paramNumChannels = controlName.numChannels;
 		paramRate = controlName.rate;
@@ -546,7 +641,7 @@ AlgaNode {
 			//Read \in from the sender's synthBus
             interpSynth = AlgaSynth.new(
                 interpSymbol,
-                [\in, sender.synthBus.busArg, \out, interpBus.index, \fadeTime, connectionTime],
+                [\in, sender.synthBus.busArg, \out, interpBus.index, \fadeTime, paramConnectionTime],
                 interpGroup
             );
 		}, {
@@ -567,7 +662,7 @@ AlgaNode {
 
 			interpSynth = AlgaSynth.new(
 				interpSymbol,
-				[\in, paramVal, \out, interpBus.index, \fadeTime, connectionTime],
+				[\in, paramVal, \out, interpBus.index, \fadeTime, paramConnectionTime],
 				interpGroup
 			);
 		});
@@ -654,8 +749,17 @@ AlgaNode {
     //THIS, TOGETHER WITH createInterpSynthAtParam, IS THE WHOLE CORE OF THE INTERPOLATION BEHAVIOUR!!!
 	freeInterpSynthAtParam { | param = \in |
 		var interpSynthAtParam = interpSynths[param];
-		if(interpSynthAtParam == nil, { ("Invalid param for interp synth to free: " ++ param).error; ^this });
-        interpSynthAtParam.set(\gate, 0, \fadeTime, connectionTime);
+		var paramConnectionTime = paramsConnectionTime[param];
+
+		if((interpSynthAtParam.isNil).or(paramConnectionTime.isNil), {
+			("Invalid param for interp synth to free: " ++ param).error;
+			^this
+		});
+
+		//If -1, or invalid, set to global connectionTime
+		if(paramConnectionTime < 0, { paramConnectionTime = connectionTime });
+
+        interpSynthAtParam.set(\gate, 0, \fadeTime, paramConnectionTime);
 	}
 
 	//param -> Set[AlgaNode, AlgaNode, ...]
