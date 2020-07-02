@@ -62,6 +62,9 @@ AlgaNode {
 		normBusses   = Dictionary(10);
 		interpBusses = Dictionary(10);
 		normSynths   = Dictionary(10);
+
+		//Dictionary of IdentityDictonaries:
+		//\param -> IdentityDictionary(sender, interpolationProxy)
 		interpSynths = Dictionary(10);
 
 		//Per-argument connections to this AlgaNode. These are in the form:
@@ -115,7 +118,8 @@ AlgaNode {
 		//paramConnectionTimes, checking against the previous connectionTime (before updating it)
 		this.setParamsConnectionTime(val, all, param);
 
-		//Only set global connectionTime if param is nil
+		//Only set global connectionTime if param is nil,
+		//cause if param != nil it means val only has to be applied to that specific param
 		if(param == nil, {
 			connectionTime = val;
 		});
@@ -439,6 +443,8 @@ AlgaNode {
 
 	//Remove \fadeTime \out and \gate and generate controlNames dict entries
 	createControlNamesAndParamsConnectionTime { | synthDescControlNames |
+		interpSynths.clear;
+
 		synthDescControlNames.do({ | controlName |
 			var paramName = controlName.name;
 			if((controlName.name != \fadeTime).and(
@@ -453,6 +459,9 @@ AlgaNode {
 
 				//Create paramsConnectionTime
 				paramsConnectionTime[paramName] = connectionTime;
+
+				//Create IdentityDictionaries for each interpNode
+				interpSynths[paramName] = IdentityDictionary();
 			});
 		});
 	}
@@ -499,7 +508,6 @@ AlgaNode {
 		);
 	}
 
-	//This should take in account the nextNode's numChannels when making connections
 	createInterpNormSynths { | replace = false |
 		controlNames.do({ | controlName |
 			var interpSymbol, normSymbol;
@@ -576,7 +584,9 @@ AlgaNode {
 				normGroup
 			);
 
-			interpSynths[paramName] = interpSynth;
+			//interpSynths is a Dict of IdentityDicts
+			interpSynths[paramName][\default] = interpSynth;
+
 			normSynths[paramName] = normSynth;
 
 			//Connect synth's parameter to the normBus
@@ -667,8 +677,8 @@ AlgaNode {
 			);
 		});
 
-		//Add synth to interpSynths
-		interpSynths[param] = interpSynth;
+		//Add to interpSynths for the param
+		interpSynths[param][sender] = interpSynth;
 	}
 
 
@@ -724,8 +734,10 @@ AlgaNode {
 				//node will take to interpolate to the previous receivers) and then free all the previous stuff
 				(longestWaitTime + 1.0).wait;
 
-				prevInterpSynths.do({ | interpSynth |
-					interpSynth.set(\gate, 0, \fadeTime, 0);
+				prevInterpSynths.do({ | interpSynthIdentityDict |
+					interpSynthIdentityDict.do({ | interpSynth |
+						interpSynth.set(\gate, 0, \fadeTime, 0);
+					});
 				});
 
 				prevNormSynths.do({ | normSynth |
@@ -740,18 +752,16 @@ AlgaNode {
 		this.freeSynth(useConnectionTime, now);
 	}
 
-	freeAllSynthOnNewInstantiation { | useConnectionTime = true, now = true |
-		this.freeAllSynths(useConnectionTime, now);
-	}
-
 	//This is only used in connection situations
 	//THIS USES connectionTime!!
     //THIS, TOGETHER WITH createInterpSynthAtParam, IS THE WHOLE CORE OF THE INTERPOLATION BEHAVIOUR!!!
-	freeInterpSynthAtParam { | param = \in |
-		var interpSynthAtParam = interpSynths[param];
+	freeInterpSynthAtParam { | sender, param = \in, mix = false |
+		var interpSynthsAtParam = interpSynths[param];
+		var defaultInterpSynth = interpSynthsAtParam[\default];
+		var senderInterpSynth = interpSynthsAtParam[sender];
 		var paramConnectionTime = paramsConnectionTime[param];
 
-		if((interpSynthAtParam.isNil).or(paramConnectionTime.isNil), {
+		if((interpSynthsAtParam.isNil).or(paramConnectionTime.isNil), {
 			("Invalid param for interp synth to free: " ++ param).error;
 			^this
 		});
@@ -759,7 +769,29 @@ AlgaNode {
 		//If -1, or invalid, set to global connectionTime
 		if(paramConnectionTime < 0, { paramConnectionTime = connectionTime });
 
-        interpSynthAtParam.set(\gate, 0, \fadeTime, paramConnectionTime);
+		if(mix, {
+			//First time freeing a synth at param: remove the default one, used at creation (if mix == false)
+			//If defaultInterpSynths is nil already, it's already been removed.
+			if(defaultInterpSynth != nil, {
+				defaultInterpSynth.set(\gate, 0, \fadeTime, paramConnectionTime);
+				interpSynthsAtParam.removeAt(\default);
+			});
+
+			//Other cases: retrieve sender's interpSynth
+			if(senderInterpSynth != nil, {
+				senderInterpSynth.set(\gate, 0, \fadeTime, paramConnectionTime);
+				if(interpSynthsAtParam.size == 1, { interpSynthsAtParam.clear });
+			});
+		}, {
+			//Free all if mix == false
+			interpSynthsAtParam.do({ | interpSynthsAtParamDict |
+				interpSynthsAtParamDict.do({ | interpSynth |
+					interpSynth.set(\gate, 0, \fadeTime, paramConnectionTime);
+				});
+			});
+
+			interpSynthsAtParam.clear;
+		});
 	}
 
 	//param -> Set[AlgaNode, AlgaNode, ...]
@@ -796,9 +828,9 @@ AlgaNode {
 	}
 
 	//add entries to the inNodes / outNodes / connectionTimeOutNodes of the two AlgaNodes
-	addInOutNodesDict { | sender, param = \in |
+	addInOutNodesDict { | sender, param = \in, mix = false |
 		//This will replace the entries on new connection (as mix == false)
-		this.addInNode(sender, param);
+		this.addInNode(sender, param, mix);
 
 		//This will add the entries to the existing Set, or create a new one
 		if(sender.isAlgaNode, {
@@ -811,8 +843,8 @@ AlgaNode {
 	}
 
 	removeInOutNode { | sender, param = \in |
-		sender.outNodes[this].remove(param);
-		inNodes[param].remove(sender);
+		sender.outNodes[this].removeAt(param);
+		inNodes[param].removeAt(sender);
 
 		//Recalculate longestConnectionTime too...
 		//SHOULD THIS BE DONE AFTER THE SYNTHS ARE CREATED???
@@ -868,12 +900,12 @@ AlgaNode {
 	}
 
 	//New interp connection at specific parameter
-	newInterpConnectionAtParam { | sender, param = \in, replace = false |
+	newInterpConnectionAtParam { | sender, param = \in, replace = false, mix = false |
 		var controlName = controlNames[param];
 		if(controlName == nil, { ("Invalid param to create a new interp synth for: " ++ param).error; ^this; });
 
 		//Add proper inNodes / outNodes / connectionTimeOutNodes
-		this.addInOutNodesDict(sender, param);
+		this.addInOutNodesDict(sender, param, mix:mix);
 
 		//Re-order groups
 		//Actually reorder the block's nodes ONLY if not running .replace
@@ -883,8 +915,8 @@ AlgaNode {
 			AlgaBlocksDict.createNewBlockIfNeeded(this, sender);
 		});
 
-		//Free previous interp synth (fades out)
-        this.freeInterpSynthAtParam(param);
+		//Free previous interp synth (fades out). If mix == false, it frees all of the previous ones
+        this.freeInterpSynthAtParam(sender, param, mix);
 
         //Spawn new interp synth (fades in)
         this.createInterpSynthAtParam(sender, param);
@@ -901,20 +933,25 @@ AlgaNode {
 		//Re-order groups shouldn't be needed when removing connections
 
 		//Free previous interp synth (fades out)
-		this.freeInterpSynthAtParam(param);
+		this.freeInterpSynthAtParam(nil, param, false);
 
 		//Create new interp synth with default value (or the one supplied with args at start) (fades in)
 		this.createInterpSynthAtParam(nil, param);
 	}
 
 	//implements receiver <<.param sender
-	makeConnection { | sender, param = \in, replace = false |
+	makeConnection { | sender, param = \in, replace = false, mix = false |
 		//Can't connect AlgaNode to itself
 		if(this === sender, { "Can't connect an AlgaNode to itself".error; ^this });
 
+		if(mix, {
+			//Create new normalizer for specific param and sender combination!
+
+		});
+
 		//Connect interpSynth to the sender's synthBus
 		AlgaSpinRoutine.waitFor( { (this.instantiated).and(sender.instantiated) }, {
-			this.newInterpConnectionAtParam(sender, param, replace:replace);
+			this.newInterpConnectionAtParam(sender, param, replace:replace, mix:mix);
 		});
 	}
 
@@ -955,7 +992,7 @@ AlgaNode {
 				("Trying to enstablish a connection between two AlgaNodes on different servers").error;
 				^this;
 			});
-			this.makeConnection(sender, param);
+			this.makeConnection(sender, param, mix:true);
 		}, {
 			("Trying to enstablish a connection from an invalid AlgaNode: " ++ sender).error;
 		});
@@ -968,7 +1005,7 @@ AlgaNode {
 				("Trying to enstablish a connection between two AlgaNodes on different servers").error;
 				^this;
 			});
-            receiver.makeConnection(this, param);
+            receiver.makeConnection(this, param, mix:true);
         }, {
 			("Trying to enstablish a connection to an invalid AlgaNode: " ++ receiver).error;
         });
@@ -1007,6 +1044,7 @@ AlgaNode {
 		//This will effectively trigger interpolation process.
 		outNodes.keysValuesDo({ | receiver, paramsSet |
 			paramsSet.do({ | param |
+				//What about mix on replace?
 				receiver.makeConnection(this, param, replace:true);
 			});
 		});
@@ -1088,8 +1126,10 @@ AlgaNode {
 	instantiated {
 		if(synth == nil, { ^false });
 
-		interpSynths.do({ | interpSynth |
-			if(interpSynth.instantiated == false, { ^false });
+		interpSynths.do({ | interpSynthsAtParam |
+			interpSynthsAtParam.do({ | interpSynth |
+				if(interpSynth.instantiated == false, { ^false });
+			});
 		});
 
 		normSynths.do({ | normSynth |
