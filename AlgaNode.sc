@@ -614,7 +614,8 @@ AlgaNode {
 		this.createInterpNormSynths(replace);
 	}
 
-	createInterpBusAndNormSynthAtParam { | sender, param |
+	//This happens on <<+ / >>+
+	createInterpBusAndNormSynthAtParam { | sender, param = \in |
 		var controlName;
 		var paramNumChannels, paramRate;
 		var normSymbol, normBus;
@@ -649,11 +650,11 @@ AlgaNode {
 		normSynths[param][sender] = normSynth;
 
 		//Create a fictional interpSynthAtParam with defaultvalue = 0 it will be freed but needed for interp
-		this.createInterpSynthAtParam(sender, param, true);
+		this.createInterpSynthAtParam(sender, param, fictional_fadein:true);
 	}
 
 	//Used at every << / >> / <|
-	createInterpSynthAtParam { | sender, param = \in, fictional = false |
+	createInterpSynthAtParam { | sender, param = \in, fictional_fadein = false, fictional_fadeout = false |
 		var controlName, paramConnectionTime;
 		var paramNumChannels, paramRate;
 		var senderNumChannels, senderRate;
@@ -700,26 +701,16 @@ AlgaNode {
 
 		if(interpBusAtParam == nil, { ("Invalid interp bus at param " ++ param).error; ^this });
 
-		interpBus = interpBusAtParam[\default];
+		//Try to get sender one. If not, the default one
+		interpBus = interpBusAtParam[sender];
 
-		//Still using \default, replace it
-		if(interpBus != nil, {
-			interpBusAtParam[sender] = interpBus;
-			interpBusAtParam.removeAt(\default);
-		}, {
-			interpBus = interpBusAtParam[sender];
+		if(interpBus == nil, {
+			interpBus = interpBusAtParam[\default];
 			if(interpBus == nil, { ("Invalid interp bus at param " ++ param ++ " and node " ++ sender.asString).error; ^this });
+			interpBusAtParam[sender] = interpBus;
 		});
 
-		//fictional is used to create a dummy interpSynth with value 0 that will be used as
-		//interpolation start when doing mixing... it's needed in order for interpolation to work
-		if(fictional, {
-			interpSynth = AlgaSynth.new(
-				interpSymbol,
-				[\in, 0, \out, interpBus.index, \fadeTime, 0],
-				interpGroup
-			)
-		}, {
+		if((fictional_fadein.not).and(fictional_fadeout.not), {
 			//new interp synth, with input connected to sender and output to the interpBus
 			//THIS USES connectionTime!!
 			//THIS, together with freeInterpSynthAtParam, IS THE WHOLE CORE OF THE INTERPOLATION BEHAVIOUR!!!
@@ -746,6 +737,23 @@ AlgaNode {
 						^nil;
 					});
 				});
+			});
+		}, {
+			//fictional is used to create a dummy interpSynth with value 0 that will be used as
+			//interpolation start when doing mixing... it's needed in order for interpolation to work
+			if(fictional_fadein, {
+				interpSynth = AlgaSynth.new(
+					interpSymbol,
+					[\in, 0, \out, interpBus.index, \fadeTime, 0],
+					interpGroup
+				);
+			}, {
+				"AIII".postln;
+				^AlgaSynth.new(
+					interpSymbol,
+					[\in, 0, \out, interpBus.index, \fadeTime, paramConnectionTime],
+					interpGroup
+				)
 			});
 		});
 
@@ -787,13 +795,13 @@ AlgaNode {
 			//Free synths now
 			interpSynths.do({ | interpSynthsAtParam |
 				interpSynthsAtParam.do({ | interpSynth |
-					interpSynth.set(\gate, 0, \fadeTime, if(useConnectionTime, { longestWaitTime }, {0}));
+					interpSynth.set(\gate, 0, \fadeTime, if(useConnectionTime, { longestWaitTime }, { 0 }));
 				});
 			});
 
 			normSynths.do({ | normSynthsAtParam |
 				normSynthsAtParam.do({ | normSynth |
-					normSynth.set(\gate, 0, \fadeTime, if(useConnectionTime, { longestWaitTime }, {0}));
+					normSynth.set(\gate, 0, \fadeTime, if(useConnectionTime, { longestWaitTime }, { 0 }));
 				});
 			});
 
@@ -864,14 +872,24 @@ AlgaNode {
 				if(interpSynthsAtParam.size == 1, { interpSynthsAtParam.clear });
 			});
 		}, {
+			var numOfInterpSynthsAtParam = interpSynthsAtParam.size;
+
 			//Free all if mix == false
 			interpSynthsAtParam.do({ | interpSynthsAtParamDict |
 				interpSynthsAtParamDict.do({ | interpSynth |
+					if(numOfInterpSynthsAtParam > 1, {
+						//Create a fictional interp synth to perform interp off
+						var fictionalInterpSynth = this.createInterpSynthAtParam(sender, param, fictional_fadeout:true);
+						fork {
+							(longestWaitTime + 0.2).wait;
+							fictionalInterpSynth.set(\gate, 0, \fadeTime, 0);
+						}
+
+					});
+
 					interpSynth.set(\gate, 0, \fadeTime, paramConnectionTime);
 				});
 			});
-
-			interpSynthsAtParam.clear;
 		});
 	}
 
@@ -1028,7 +1046,8 @@ AlgaNode {
 		if(this === sender, { "Can't connect an AlgaNode to itself".error; ^this });
 
 		if(mix, {
-			//Create new interpBus and normSynth for specific param and sender combination!
+			//Create new interpBus and normSynth for specific param and sender combination...
+			//this has to happen before this.instantiated
 			this.createInterpBusAndNormSynthAtParam(sender, param);
 		});
 
