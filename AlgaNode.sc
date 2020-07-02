@@ -60,7 +60,13 @@ AlgaNode {
 
 		//Per-argument dictionaries of interp/norm Busses and Synths belonging to this AlgaNode
 		normBusses   = Dictionary(10);
+
+		//Dictionary of IdentityDictonaries:
+		//\param -> IdentityDictionary(sender, interpolationProxy)
 		interpBusses = Dictionary(10);
+
+		//Dictionary of IdentityDictonaries:
+		//\param -> IdentityDictionary(sender, interpolationProxy)
 		normSynths   = Dictionary(10);
 
 		//Dictionary of IdentityDictonaries:
@@ -287,7 +293,7 @@ AlgaNode {
 			var paramNumChannels = controlName.numChannels;
 
 			//interpBusses have 1 more channel for the envelope shape
-			interpBusses[paramName] = AlgaBus(server, paramNumChannels + 1, paramRate);
+			interpBusses[paramName][\default] = AlgaBus(server, paramNumChannels + 1, paramRate);
 			normBusses[paramName] = AlgaBus(server, paramNumChannels, paramRate);
 		});
 	}
@@ -348,8 +354,10 @@ AlgaNode {
 				});
 
 				if(prevInterpBusses != nil, {
-					prevInterpBusses.do({ | interpBus |
-						if(interpBus != nil, { interpBus.free });
+					prevInterpBusses.do({ | interpBussesAtParam |
+						interpBussesAtParam.do({ | interpBus |
+							if(interpBus != nil, { interpBus.free });
+						});
 					});
 				});
 			}
@@ -404,7 +412,7 @@ AlgaNode {
 		});
 
 		synthDescControlNames = synthDesc.controls;
-		this.createControlNamesAndParamsConnectionTime(synthDescControlNames);
+		this.createAllParams(synthDescControlNames);
 
 		numChannels = synthDef.numChannels;
 		rate = synthDef.rate;
@@ -427,7 +435,7 @@ AlgaNode {
 			server.sync;
 
 			synthDescControlNames = synthDef.asSynthDesc.controls;
-			this.createControlNamesAndParamsConnectionTime(synthDescControlNames);
+			this.createAllParams(synthDescControlNames);
 
 			numChannels = synthDef.numChannels;
 			rate = synthDef.rate;
@@ -442,8 +450,14 @@ AlgaNode {
 	}
 
 	//Remove \fadeTime \out and \gate and generate controlNames dict entries
-	createControlNamesAndParamsConnectionTime { | synthDescControlNames |
+	createAllParams { | synthDescControlNames |
+		//Clear previous ones
+		controlNames.clear;
+		paramsConnectionTime.clear; //this shouldn't reset on .replace tho...
+		interpBusses.clear;
 		interpSynths.clear;
+		normSynths.clear;
+
 
 		synthDescControlNames.do({ | controlName |
 			var paramName = controlName.name;
@@ -457,10 +471,12 @@ AlgaNode {
 				//Create controlNames
 				controlNames[paramName] = controlName;
 
-				//Create paramsConnectionTime
+				//Create paramsConnectionTime... This shouldn't reset on .replace tho...
 				paramsConnectionTime[paramName] = connectionTime;
 
 				//Create IdentityDictionaries for each interpNode
+				interpBusses[paramName] = IdentityDictionary();
+				normSynths[paramName] = IdentityDictionary();
 				interpSynths[paramName] = IdentityDictionary();
 			});
 		});
@@ -535,7 +551,7 @@ AlgaNode {
 				paramNumChannels
 			).asSymbol;
 
-			interpBus = interpBusses[paramName];
+			interpBus = interpBusses[paramName][\default];
 			normBus = normBusses[paramName];
 
             //If replace, connect to the pervious bus, not default
@@ -587,7 +603,7 @@ AlgaNode {
 			//interpSynths is a Dict of IdentityDicts
 			interpSynths[paramName][\default] = interpSynth;
 
-			normSynths[paramName] = normSynth;
+			normSynths[paramName][\default] = normSynth;
 
 			//Connect synth's parameter to the normBus
 			synth.set(paramName, normBus.busArg);
@@ -641,7 +657,7 @@ AlgaNode {
 			paramNumChannels
 		).asSymbol;
 
-		interpBus = interpBusses[param];
+		interpBus = interpBusses[param][\default];
 
 		//new interp synth, with input connected to sender and output to the interpBus
 		//THIS USES connectionTime!!
@@ -734,14 +750,16 @@ AlgaNode {
 				//node will take to interpolate to the previous receivers) and then free all the previous stuff
 				(longestWaitTime + 1.0).wait;
 
-				prevInterpSynths.do({ | interpSynthIdentityDict |
-					interpSynthIdentityDict.do({ | interpSynth |
+				prevInterpSynths.do({ | interpSynthsAtParam |
+					interpSynthsAtParam.do({ | interpSynth |
 						interpSynth.set(\gate, 0, \fadeTime, 0);
 					});
 				});
 
-				prevNormSynths.do({ | normSynth |
-					normSynth.set(\gate, 0, \fadeTime, 0);
+				prevNormSynths.do({ | normSynthsAtParam |
+					normSynthsAtParam.do({ | normSynth |
+						normSynth.set(\gate, 0, \fadeTime, 0);
+					});
 				});
 			}
 		});
@@ -945,6 +963,8 @@ AlgaNode {
 		if(this === sender, { "Can't connect an AlgaNode to itself".error; ^this });
 
 		if(mix, {
+			//Create new interpBus for specific param and sender combination!
+
 			//Create new normalizer for specific param and sender combination!
 
 		});
