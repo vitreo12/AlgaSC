@@ -364,7 +364,7 @@ outs;
 var args = \\args.ar([0, 0]);
 var val = args[0];
 var env = args[1];
-var out = val / env;
+var out = Sanitize.ar(val / env);
 out;
 }).add;";
 
@@ -372,7 +372,7 @@ out;
 var args = \\args.kr([0, 0]);
 var val = args[0];
 var env = args[1];
-var out = val / env;
+var out = Sanitize.kr(val / env);
 out;
 }).add;";
 
@@ -390,7 +390,7 @@ out;
 var args = \\args.ar( " ++ arrayOfZeros ++ ");
 var val = args[0.." ++ (counter - 1).asString ++ "];
 var env = args[" ++ counter.asString ++ "];
-var out = val / env;
+var out = Sanitize.ar(val / env);
 out;
 }).add;";
 
@@ -398,7 +398,7 @@ out;
 var args = \\args.kr( " ++ arrayOfZeros ++ ");
 var val = args[0.." ++ (counter - 1).asString ++ "];
 var env = args[" ++ counter.asString ++ "];
-var out = val / env;
+var out = Sanitize.kr(val / env);
 out;
 }).add;";
 
