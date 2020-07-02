@@ -458,7 +458,6 @@ AlgaNode {
 		interpSynths.clear;
 		normSynths.clear;
 
-
 		synthDescControlNames.do({ | controlName |
 			var paramName = controlName.name;
 			if((controlName.name != \fadeTime).and(
