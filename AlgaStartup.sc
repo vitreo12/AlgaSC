@@ -120,6 +120,60 @@ Out.ar(\\out.ir(0), Limiter.ar(input) * AlgaEnvGate.ar)
 
 		//var file = File("~/AlgaSynthDefsTest.scd".standardizePath,"w");
 
+		//Env
+		var envAr = "
+AlgaSynthDef(\\alga_env_audio, {  | envCurve = \\sin |
+var env = AlgaEnvGate.ar(
+curve: envCurve,
+doneAction: Done.freeSelfAndNext
+);
+Out.ar(\\out.ir(0), env)
+});
+";
+		var envKr = "
+AlgaSynthDef(\\alga_env_control, { | envCurve = \\sin |
+var env = AlgaEnvGate.kr(
+curve: envCurve,
+doneAction: Done.freeSelfAndNext
+);
+Out.kr(\\out.ir(0), env)
+});
+";
+		var envInvAr = "
+AlgaSynthDef(\\alga_envInv_audio, { | envCurve = \\sin |
+var env = AlgaEnvGateInv.ar(
+i_level: In.ar(\\out.ir(0)), //read starting value from same bus!
+curve: envCurve,
+doneAction: Done.freeSelfAndNext //Next is always going to be the desired interp synth
+);
+
+//Free prev env right away
+Free.kr(1, \\prevEnvID.ir(-1));
+
+//ReplaceOut is essential here
+ReplaceOut.ar(\\out.ir(0), env);
+});
+";
+		var envInvKr = "
+AlgaSynthDef(\\alga_envInv_control, { | envCurve = \\sin |
+var env = AlgaEnvGateInv.kr(
+i_level: In.kr(\\out.ir(0)), //read starting value from same bus!
+curve: envCurve,
+doneAction: Done.freeSelfAndNext //Next is always going to be the desired interp synth
+);
+
+//Free prev env right away
+Free.kr(1, \\prevEnvID.ir(-1));
+
+//ReplaceOut is essential here
+ReplaceOut.kr(\\out.ir(0), env);
+});
+";
+		envAr.interpret;
+		envKr.interpret;
+		envInvAr.interpret;
+		envInvKr.interpret;
+
 		algaMaxIO.do({ | i |
 
 			var arrayOfZeros_in;
@@ -176,6 +230,10 @@ Out.ar(\\out.ir(0), Limiter.ar(input) * AlgaEnvGate.ar)
 					var outs = "outs[0] = out;";
 					var indices_ar = "in;";
 					var indices_kr = "in;";
+					var select_ar = "Select.ar(\\useScaling.ir(0), [out, outScale]);";
+					var select_kr = "Select.kr(\\useScaling.ir(0), [out, outScale]);";
+					var env_ar = "\\env.ar(0);"
+					var env_kr = "\\env.kr(0);"
 
 					if(y > 1, {
 						outs = y.asString ++ ".do({ | i | outs[i] = out[i]});";
@@ -194,32 +252,32 @@ Out.ar(\\out.ir(0), Limiter.ar(input) * AlgaEnvGate.ar)
 							name = "\\alga_interp_audio" ++ i ++ "_audio" ++ y;
 							in = "\\in.ar(" ++ arrayOfZeros_in ++ ");";
 							indices = indices_ar;
-							scaling = "Select.ar(\\useScaling.ir(0), [out, outScale]);";
-							env = "AlgaEnvGate.ar(i_level: 0, doneAction:2, curve: envCurve);";
+							scaling = select_ar;
+							env = env_ar;
 						});
 
 						if(rate == \kr_kr, {
 							name = "\\alga_interp_control" ++ i ++ "_control" ++ y;
 							in = "\\in.kr(" ++ arrayOfZeros_in ++ ");";
 							indices = indices_kr;
-							scaling = "Select.kr(\\useScaling.ir(0), [out, outScale]);";
-							env = "AlgaEnvGate.kr(i_level: 0, doneAction:2, curve: envCurve);";
+							scaling = scaling_kr;
+							env = env_kr;
 						});
 
 						if(rate == \ar_kr, {
 							name = "\\alga_interp_audio" ++ i ++ "_control" ++ y;
 							in = "A2K.kr(\\in.ar(" ++ arrayOfZeros_in ++ "));";
 							indices = indices_kr;
-							scaling = "Select.kr(\\useScaling.ir(0), [out, outScale]);";
-							env = "AlgaEnvGate.kr(i_level: 0, doneAction:2, curve: envCurve);";
+							scaling = scaling_kr;
+							env = env_kr;
 						});
 
 						if(rate == \kr_ar, {
 							name = "\\alga_interp_control" ++ i ++ "_audio" ++ y;
 							in = "K2A.ar(\\in.kr(" ++ arrayOfZeros_in ++ "));";
 							indices = indices_ar;
-							scaling = "Select.ar(\\useScaling.ir(0), [out, outScale]);";
-							env = "AlgaEnvGate.ar(i_level: 0, doneAction:2, curve: envCurve);";
+							scaling = select_ar;
+							env = env_ar;
 						});
 
 						result = "
@@ -237,10 +295,6 @@ scaleCurve,
 out = " ++ scaling ++ "
 env = " ++ env ++ "
 out = out * env;
-outs = Array.newClear(" ++ (y + 1) ++ ");
-" ++ outs ++ "
-outs[" ++ y ++ "] = env;
-outs;
 }, makeFadeEnv:false).writeDefFile(AlgaStartup.algaSynthDefIOPath);";
 
 						result.interpret;
@@ -269,18 +323,16 @@ outs;
 			if(i == 1, {
 
 				result_audio = "AlgaSynthDef(\\alga_norm_audio1, {
-var args = \\args.ar([0, 0]);
-var val = args[0];
-var env = args[1];
-var out = Sanitize.ar(val / env);
+var in = \\in.ar(0);
+var env = \\env.ar(0);
+var out = Sanitize.ar(in / env);
 out;
 }).writeDefFile(AlgaStartup.algaSynthDefIOPath);";
 
 				result_control = "AlgaSynthDef(\\alga_norm_control1, {
-var args = \\args.kr([0, 0]);
-var val = args[0];
-var env = args[1];
-var out = Sanitize.kr(val / env);
+var in = \\in.kr(0);
+var env = \\env.kr(0);
+var out = Sanitize.kr(in / env);
 out;
 }).writeDefFile(AlgaStartup.algaSynthDefIOPath);";
 
@@ -295,18 +347,16 @@ out;
 				arrayOfZeros = arrayOfZeros[0..(arrayOfZeros.size - 2)] ++ "]";
 
 				result_audio = "AlgaSynthDef(\\alga_norm_audio" ++ i.asString ++ ", {
-var args = \\args.ar(" ++ arrayOfZeros ++ ");
-var val = args[0.." ++ (i - 1).asString ++ "];
-var env = args[" ++ i.asString ++ "];
-var out = Sanitize.ar(val / env);
+var in = \\in.ar(" ++ arrayOfZeros ++ ");
+var env = \\env.ar(0);
+var out = Sanitize.ar(in / env);
 out;
 }).writeDefFile(AlgaStartup.algaSynthDefIOPath);";
 
 				result_control = "AlgaSynthDef(\\alga_norm_control" ++ i.asString ++ ", {
 var args = \\args.kr(" ++ arrayOfZeros ++ ");
-var val = args[0.." ++ (i - 1).asString ++ "];
-var env = args[" ++ i.asString ++ "];
-var out = Sanitize.kr(val / env);
+var env = \\env.kr(0);
+var out = Sanitize.kr(in / env);
 out;
 }).writeDefFile(AlgaStartup.algaSynthDefIOPath);";
 
