@@ -125,7 +125,7 @@ Out.ar(\\out.ir(0), Limiter.ar(input) * AlgaEnvGate.ar)
 AlgaSynthDef(\\alga_env_audio, {  | envCurve = \\sin |
 var env = AlgaEnvGate.ar(
 curve: envCurve,
-doneAction: Done.freeSelfAndNext
+doneAction: Done.freeGroup
 );
 Out.ar(\\out.ir(0), env)
 });
@@ -134,7 +134,7 @@ Out.ar(\\out.ir(0), env)
 AlgaSynthDef(\\alga_env_control, { | envCurve = \\sin |
 var env = AlgaEnvGate.kr(
 curve: envCurve,
-doneAction: Done.freeSelfAndNext
+doneAction: Done.freeGroup
 );
 Out.kr(\\out.ir(0), env)
 });
@@ -144,7 +144,7 @@ AlgaSynthDef(\\alga_envInv_audio, { | envCurve = \\sin |
 var env = AlgaEnvGateInv.ar(
 i_level: In.ar(\\out.ir(0)), //read starting value from same bus!
 curve: envCurve,
-doneAction: Done.freeSelfAndNext //Next is always going to be the desired interp synth
+doneAction: Done.freeGroup
 );
 
 //Free prev env right away
@@ -159,7 +159,7 @@ AlgaSynthDef(\\alga_envInv_control, { | envCurve = \\sin |
 var env = AlgaEnvGateInv.kr(
 i_level: In.kr(\\out.ir(0)), //read starting value from same bus!
 curve: envCurve,
-doneAction: Done.freeSelfAndNext //Next is always going to be the desired interp synth
+doneAction: Done.freeGroup
 );
 
 //Free prev env right away
@@ -227,17 +227,12 @@ ReplaceOut.kr(\\out.ir(0), env);
 
 				//Not done already
 				if(isAlreadyDone.isNil, {
-					var outs = "outs[0] = out;";
 					var indices_ar = "in;";
 					var indices_kr = "in;";
 					var select_ar = "Select.ar(\\useScaling.ir(0), [out, outScale]);";
 					var select_kr = "Select.kr(\\useScaling.ir(0), [out, outScale]);";
 					var env_ar = "\\env.ar(0);"
 					var env_kr = "\\env.kr(0);"
-
-					if(y > 1, {
-						outs = y.asString ++ ".do({ | i | outs[i] = out[i]});";
-					});
 
 					if(i > 1, {
 						indices_ar = "Select.ar(\\indices.ir(" ++ arrayOfIndices ++ "), in);";
