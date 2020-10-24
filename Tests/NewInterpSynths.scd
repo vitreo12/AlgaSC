@@ -39,3 +39,6 @@ SynthDef(\envInv, {
 ~envInv = Synth(\envInv, [\out, ~envBus.index, \prevEnvID, ~env.nodeID, \fadeTime, 5], ~group);
 
 ~envInv2 = Synth(\envInv, [\out, ~envBus.index, \prevEnvID, ~envInv.nodeID, \fadeTime, 0.1], ~group);
+
+
+//add all interpsynths + env to a dictionary, and everytime a new one is spawned (and time is different) trigger all the new envelopes for each previous interp synth. the entries in the dict will wait for the specific node to be freed (using Node.onFree) before being removed from the dictionary!
