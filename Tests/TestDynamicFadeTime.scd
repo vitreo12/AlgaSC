@@ -1,9 +1,8 @@
 (
 AlgaStartup.algaMaxIO = 2;
-Alga.initSynthDefs
+Alga.initSynthDefs;
+Alga.boot({s.plotTree});
 )
-
-Alga.boot({s.plotTree})
 
 a = AlgaNode({SinOsc.ar(\f.kr(440))}).play
 
@@ -14,3 +13,5 @@ a.from(100, \f).ct_(1);
 
 a.from(1000, \f, time:5);
 a.from(100, \f, time:1);
+
+s.scope

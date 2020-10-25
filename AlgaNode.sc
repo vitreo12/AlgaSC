@@ -42,8 +42,8 @@ AlgaNode {
 	var <outs;
 
 	var <group, <playGroup, <synthGroup, <normGroup, <interpGroup;
-	var <playSynth, <synth, <normSynths, <interpSynths;
-	var <synthBus, <normBusses, <interpBusses;
+	var <playSynth, <synth, <normSynths, <interpSynths, <envSynths;
+	var <synthBus, <normBusses, <interpBusses, <envBusses;
 
 	var <inNodes, <outNodes;
 
@@ -97,12 +97,20 @@ AlgaNode {
 		interpBusses = IdentityDictionary(10);
 
 		//IdentityDictionary of IdentityDictonaries: (needed for mixing)
+		//\param -> IdentityDictionary(sender -> envBus)
+		envBusses = IdentityDictionary(10);
+
+		//IdentityDictionary of IdentityDictonaries: (needed for mixing)
 		//\param -> IdentityDictionary(sender -> normSynth)
 		normSynths   = IdentityDictionary(10);
 
 		//IdentityDictionary of IdentityDictonaries: (needed for mixing)
 		//\param -> IdentityDictionary(sender -> interpSynth)
 		interpSynths = IdentityDictionary(10);
+
+		//IdentityDictionary of IdentityDictonaries: (needed for mixing)
+		//\param -> IdentityDictionary(sender -> envSynth)
+		envSynths = IdentityDictionary(10);
 
 		//Per-argument connections to this AlgaNode. These are in the form:
 		//(param -> IdentitySet[AlgaNode, AlgaNode...]). Multiple AlgaNodes are used when
@@ -368,8 +376,8 @@ AlgaNode {
 			var paramRate = controlName.rate;
 			var paramNumChannels = controlName.numChannels;
 
-			//interpBusses have 1 more channel for the envelope shape
-			interpBusses[paramName][\default] = AlgaBus(server, paramNumChannels + 1, paramRate);
+			interpBusses[paramName][\default] = AlgaBus(server, paramNumChannels, paramRate);
+			envBusses[paramName][\default] = AlgaBus(server, 1, paramRate);
 			normBusses[paramName] = AlgaBus(server, paramNumChannels, paramRate);
 		});
 	}
@@ -526,8 +534,10 @@ AlgaNode {
 				//Create IdentityDictionaries for everything needed
 				paramsChansMapping[paramName] = IdentityDictionary();
 				interpSynths[paramName] = IdentityDictionary();
+				envSynths[paramName] = IdentityDictionary();
 				normSynths[paramName] = IdentityDictionary();
 				interpBusses[paramName] = IdentityDictionary();
+				envBusses[paramName] = IdentityDictionary();
 			});
 		});
 	}
@@ -885,8 +895,14 @@ AlgaNode {
 					});
 
 					sendersSet.do({ | prevSender |
-						var interpBus, interpSynth, normSynth;
-						var interpSymbol, normSymbol;
+						var interpBus, interpSynth;
+						var envBus, envSynth;
+
+						var normSynth;
+
+						var interpSymbol, envSymbol, normSymbol;
+
+						var interpEnvGroup;
 
 						var oldParamsChansMapping = nil;
 						var oldParamScale = nil;
@@ -897,12 +913,15 @@ AlgaNode {
 						var scaleArray;
 
 						if(onlyEntry, {
-							//normal param... Also update default node!
 							interpBus = interpBusses[paramName][\default];
+							envBus = envBusses[paramName][\default];
 						}, {
-							//mix param: create a new bus too
-							interpBus = AlgaBus(server, paramNumChannels + 1, paramRate);
+							//mix param... Also update default node!
+							interpBus = AlgaBus(server, paramNumChannels, paramRate);
+							envBus = AlgaBus(server, 1, paramRate);
+
 							interpBusses[paramName][prevSender] = interpBus;
+							envBusses[paramName][prevSender] = envBus;
 						});
 
 						//Use previous entry for the channel mapping, otherwise, nil.
@@ -925,6 +944,8 @@ AlgaNode {
 							paramRate ++
 							paramNumChannels
 						).asSymbol;
+
+						envSymbol = ("alga_env_" ++ paramRate).asSymbol;
 
 						normSymbol = (
 							"alga_norm_" ++
@@ -949,6 +970,7 @@ AlgaNode {
 
 						interpSynthArgs = [
 							\in, prevSender.synthBus.busArg,
+							\env, envBus.busArg,
 							\out, interpBus.index,
 							\indices, channelsMapping,
 							\fadeTime, 0
@@ -961,27 +983,37 @@ AlgaNode {
 							});
 						});
 
+						interpEnvGroup = Group(interpGroup);
+
+						envSynth = AlgaSynth(
+							envSymbol,
+							[\out, envBus.index, \fadeTime, 0],
+							interpEnvGroup
+						);
+
 						interpSynth = AlgaSynth(
 							interpSymbol,
 							interpSynthArgs,
-							interpGroup
+							interpEnvGroup
 						);
 
 						//Instantiated right away, with no \fadeTime, as it will directly be connected to
 						//synth's parameter. Synth will read its params from all the normBusses
 						normSynth = AlgaSynth(
 							normSymbol,
-							[\args, interpBus.busArg, \out, normBus.index, \fadeTime, 0],
+							[\in, interpBus.busArg, \env, envBus.busArg, \out, normBus.index, \fadeTime, 0],
 							normGroup
 						);
 
 						if(onlyEntry, {
 							//normal param
 							interpSynths[paramName][\default] = interpSynth;
+							envSynths[paramName][\default] = envSynth;
 							normSynths[paramName][\default] = normSynth;
 						}, {
 							//mix param
 							interpSynths[paramName][prevSender] = interpSynth;
+							envSynths[paramName][prevSender] = envSynth;
 							normSynths[paramName][prevSender] = normSynth;
 
 							//And update the ones in \default if this sender is the currentDefaultNode!!!
@@ -989,6 +1021,7 @@ AlgaNode {
 							//would be a bus reading from nothing!
 							if(currentDefaultNodes[paramName] == prevSender, {
 								interpBusses[paramName][\default] = interpBus; //previous' \default should be freed
+								envBusses[paramName][\default] = envBus;
 								interpSynths[paramName][\default] = interpSynth;
 								normSynths[paramName][\default] = normSynth;
 							});
@@ -1001,6 +1034,9 @@ AlgaNode {
 
 			//interpSynths and normSynths are a IdentityDict of IdentityDicts
 			if(replace.not.or(noSenders), {
+				//e.g. \alga_env_audio
+				var envSymbol = ("alga_env_" ++ paramRate).asSymbol;
+
 				//e.g. \alga_interp_audio1_control1
 				var interpSymbol = (
 					"alga_interp_" ++
@@ -1020,23 +1056,34 @@ AlgaNode {
 
 				//default interpBus
 				var interpBus = interpBusses[paramName][\default];
+				var envBus = envBusses[paramName][\default];
 
-				//Instantiated right away, with no \fadeTime, as it will directly be connected to
-				//synth's parameter. Synth will read its params from all the normBusses
-				var normSynth = AlgaSynth.new(
-					normSymbol,
-					[\args, interpBus.busArg, \out, normBus.index, \fadeTime, 0],
-					normGroup
+				var interpEnvGroup = Group(interpGroup);
+
+				//env synth
+				var envSynth = AlgaSynth(
+					envSymbol,
+					[\out, envBus.index, \fadeTime, 0],
+					interpEnvGroup
 				);
 
 				//use paramDefault: no replace or no senders in sendersSet
-				var interpSynth = AlgaSynth.new(
+				var interpSynth = AlgaSynth(
 					interpSymbol,
-					[\in, paramDefault, \out, interpBus.index, \fadeTime, 0],
-					interpGroup
+					[\in, paramDefault, \env, envBus.busArg, \out, interpBus.index, \fadeTime, 0],
+					interpEnvGroup
+				);
+
+				//Instantiated right away, with no \fadeTime, as it will directly be connected to
+				//synth's parameter. Synth will read its params from all the normBusses
+				var normSynth = AlgaSynth(
+					normSymbol,
+					[\in, interpBus.busArg, \env, envBus.busArg, \out, normBus.index, \fadeTime, 0],
+					normGroup
 				);
 
 				interpSynths[paramName][\default] = interpSynth;
+				envSynths[paramName][\default] = envSynth;
 				normSynths[paramName][\default] = normSynth;
 			});
 		});
@@ -1071,8 +1118,8 @@ AlgaNode {
 		if(newMixConnectionOrReplaceMix, {
 			var controlName;
 			var paramNumChannels, paramRate;
-			var normSymbol, normBus;
-			var interpBus, normSynth;
+			var normSymbol, normBus, normSynth;
+			var interpBus, envBus;
 
 			controlName = controlNames[param];
 			normBus = normBusses[param];
@@ -1086,16 +1133,18 @@ AlgaNode {
 				paramNumChannels
 			).asSymbol;
 
-			//interpBus has always one more channel for the envelope
-			interpBus = AlgaBus(server, paramNumChannels + 1, paramRate);
+			interpBus = AlgaBus(server, paramNumChannels, paramRate);
+
+			envBus = AlgaBus(server, 1, paramRate);
 
 			normSynth = AlgaSynth.new(
 				normSymbol,
-				[\args, interpBus.busArg, \out, normBus.index, \fadeTime, 0],
+				[\in, interpBus.busArg, \env, envBus.busArg, \out, normBus.index, \fadeTime, 0],
 				normGroup
 			);
 
 			interpBusses[param][sender] = interpBus;
+			envBusses[param][sender] = envBus;
 			normSynths[param][sender] = normSynth;
 		});
 
@@ -1125,10 +1174,15 @@ AlgaNode {
 
 		var scaleArray;
 
-		var interpSymbol;
+		var interpSymbol, envSymbol;
 
 		var interpBusAtParam;
+		var envBusAtParam;
 		var interpBus, interpSynth;
+		var envBus, envSynth;
+
+		var interpEnvGroup;
+
 		var interpSynthArgs;
 
 		var senderSym = sender;
@@ -1185,12 +1239,14 @@ AlgaNode {
 			paramNumChannels
 		).asSymbol;
 
+		envSymbol = ("alga_env_" ++ paramRate).asSymbol;
+
 		//get interp bus ident dict at specific param
 		interpBusAtParam = interpBusses[param];
 		if(interpBusAtParam == nil, { ("Invalid interp bus at param " ++ param).error; ^this });
 
 		//Try to get sender one.
-		//If not there, get the default one (and assign it to sender for both interpBus and normSynth at param)
+		//If not there, get the default one (and assign it to sender for interpBus at param)
 		interpBus = interpBusAtParam[senderSym];
 		if(interpBus == nil, {
 			interpBus = interpBusAtParam[\default];
@@ -1205,6 +1261,27 @@ AlgaNode {
 			interpBusAtParam[senderSym] = interpBus;
 		});
 
+		//get env bus ident dict at specific param
+		envBusAtParam = interpBusses[param];
+		if(envBusAtParam == nil, { ("Invalid env bus at param " ++ param).error; ^this });
+
+		//Try to get sender one.
+		//If not there, get the default one (and assign it to sender for envBus at param)
+		envBus = envBusAtParam[senderSym];
+		if(envBus == nil, {
+			envBus = envBusAtParam[\default];
+			if(envBus == nil, {
+				(
+					"Invalid env bus at param " ++
+					param ++ " and node " ++ senderSym.asString
+				).error;
+				^this
+			});
+
+			envBusAtParam[senderSym] = envBus;
+		});
+
+		//Array for \indices parameter
 		senderChansMappingToUse = this.calculateSenderChansMappingArray(
 			param,
 			sender, //must be sender! not senderSym!
@@ -1236,11 +1313,12 @@ AlgaNode {
 				);
 			});
 
+			//read from sender's synth bus!
 			interpSynthArgs = [
 				\in, sender.synthBus.busArg,
+				\env, envBus.busArg,
 				\out, interpBus.index,
-				\indices, senderChansMappingToUse,
-				\fadeTime, time
+				\indices, senderChansMappingToUse
 			];
 
 			//add scaleArray to args
@@ -1250,8 +1328,15 @@ AlgaNode {
 				});
 			});
 
-			//Read \in from the sender's synthBus
-			interpSynth = AlgaSynth.new(
+			interpEnvGroup = Group(interpGroup);
+
+			envSynth = AlgaSynth(
+				envSymbol,
+				[\out, envBus.index, \fadeTime, time],
+				interpEnvGroup
+			);
+
+			interpSynth = AlgaSynth(
 				interpSymbol,
 				interpSynthArgs,
 				interpGroup
@@ -1275,9 +1360,9 @@ AlgaNode {
 
 			interpSynthArgs = [
 				\in, paramVal,
+				//\env, envBus.busArg,
 				\out, interpBus.index,
-				\indices, senderChansMappingToUse,
-				\fadeTime, time
+				\indices, senderChansMappingToUse
 			];
 
 			//add scaleArray to args
@@ -1287,15 +1372,24 @@ AlgaNode {
 				});
 			});
 
-			interpSynth = AlgaSynth.new(
+			interpEnvGroup = Group(interpGroup);
+
+			envSynth = AlgaSynth(
+				envSymbol,
+				[\out, envBus.index, \fadeTime, time],
+				interpEnvGroup
+			);
+
+			interpSynth = AlgaSynth(
 				interpSymbol,
 				interpSynthArgs,
-				interpGroup
+				interpEnvGroup
 			);
 		});
 
 		//Add to interpSynths for the param
 		interpSynths[param][senderSym] = interpSynth;
+		envSynths[param][senderSym] = envSynth;
 
 		//Store current \default (needed when going from mix == true to mix == false)...
 		//basically, restoring proper connections after going from <<+ to << or <|

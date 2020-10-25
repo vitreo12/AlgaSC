@@ -128,7 +128,7 @@ curve: envCurve,
 doneAction: Done.freeGroup
 );
 Out.ar(\\out.ir(0), env)
-});
+}, makeFadeEnv:false).writeDefFile(AlgaStartup.algaSynthDefIOPath);
 ";
 		var envKr = "
 AlgaSynthDef(\\alga_env_control, { | envCurve = \\sin |
@@ -137,7 +137,7 @@ curve: envCurve,
 doneAction: Done.freeGroup
 );
 Out.kr(\\out.ir(0), env)
-});
+}, makeFadeEnv:false).writeDefFile(AlgaStartup.algaSynthDefIOPath);
 ";
 		var envInvAr = "
 AlgaSynthDef(\\alga_envInv_audio, { | envCurve = \\sin |
@@ -152,7 +152,7 @@ Free.kr(1, \\prevEnvID.ir(-1));
 
 //ReplaceOut is essential here
 ReplaceOut.ar(\\out.ir(0), env);
-});
+}, makeFadeEnv:false).writeDefFile(AlgaStartup.algaSynthDefIOPath);
 ";
 		var envInvKr = "
 AlgaSynthDef(\\alga_envInv_control, { | envCurve = \\sin |
@@ -167,7 +167,7 @@ Free.kr(1, \\prevEnvID.ir(-1));
 
 //ReplaceOut is essential here
 ReplaceOut.kr(\\out.ir(0), env);
-});
+}, makeFadeEnv:false).writeDefFile(AlgaStartup.algaSynthDefIOPath);
 ";
 		envAr.interpret;
 		envKr.interpret;
@@ -229,10 +229,10 @@ ReplaceOut.kr(\\out.ir(0), env);
 				if(isAlreadyDone.isNil, {
 					var indices_ar = "in;";
 					var indices_kr = "in;";
-					var select_ar = "Select.ar(\\useScaling.ir(0), [out, outScale]);";
-					var select_kr = "Select.kr(\\useScaling.ir(0), [out, outScale]);";
-					var env_ar = "\\env.ar(0);"
-					var env_kr = "\\env.kr(0);"
+					var scaling_ar = "Select.ar(\\useScaling.ir(0), [out, outScale]);";
+					var scaling_kr = "Select.kr(\\useScaling.ir(0), [out, outScale]);";
+					var env_ar = "\\env.ar(0);";
+					var env_kr = "\\env.kr(0);";
 
 					if(i > 1, {
 						indices_ar = "Select.ar(\\indices.ir(" ++ arrayOfIndices ++ "), in);";
@@ -247,7 +247,7 @@ ReplaceOut.kr(\\out.ir(0), env);
 							name = "\\alga_interp_audio" ++ i ++ "_audio" ++ y;
 							in = "\\in.ar(" ++ arrayOfZeros_in ++ ");";
 							indices = indices_ar;
-							scaling = select_ar;
+							scaling = scaling_ar;
 							env = env_ar;
 						});
 
@@ -271,13 +271,13 @@ ReplaceOut.kr(\\out.ir(0), env);
 							name = "\\alga_interp_control" ++ i ++ "_audio" ++ y;
 							in = "K2A.ar(\\in.kr(" ++ arrayOfZeros_in ++ "));";
 							indices = indices_ar;
-							scaling = select_ar;
+							scaling = scaling_ar;
 							env = env_ar;
 						});
 
 						result = "
 AlgaSynthDef(" ++ name ++ ", { | scaleCurve = 0, envCurve = \\sin |
-var in, env, out, outScale, outs;
+var in, env, out, outScale;
 in = " ++ in ++ "
 out = " ++ indices ++ "
 outScale = out.lincurve(
@@ -325,7 +325,7 @@ out;
 }).writeDefFile(AlgaStartup.algaSynthDefIOPath);";
 
 				result_control = "AlgaSynthDef(\\alga_norm_control1, {
-var in = \\in.kr(0);
+var in = \\in.kr(0).poll;
 var env = \\env.kr(0);
 var out = Sanitize.kr(in / env);
 out;
@@ -349,7 +349,7 @@ out;
 }).writeDefFile(AlgaStartup.algaSynthDefIOPath);";
 
 				result_control = "AlgaSynthDef(\\alga_norm_control" ++ i.asString ++ ", {
-var args = \\args.kr(" ++ arrayOfZeros ++ ");
+var in = \\args.kr(" ++ arrayOfZeros ++ ");
 var env = \\env.kr(0);
 var out = Sanitize.kr(in / env);
 out;
